@@ -117,33 +117,50 @@
 
     let raw = await resp.text();
 
-    // Step 1: Remove any trailing query string / timestamp junk
+    // 1. Remove trailing junk (timestamp, query, extra text after ?)
     raw = raw.split('?')[0].trim();
 
-    // Step 2: Remove EVERY non-base64 character
-    let base64Clean = raw.replace(/[^A-Za-z0-9+/=]/g, '');
+    // 2. Remove ALL whitespace/newlines/tabs (Sheets often adds them)
+    raw = raw.replace(/\s+/g, '');
 
-    // Step 3: Fix padding if length mod 4 is wrong
-    const mod = base64Clean.length % 4;
-    if (mod === 2) base64Clean += '==';
-    if (mod === 3) base64Clean += '=';
+    // 3. Detect if it already has a proper data: prefix
+    let finalData;
+    if (raw.startsWith('data:image/jpeg;base64,')) {
+      // Already good → keep it, but clean base64 part only
+      let parts = raw.split('base64,');
+      let base64Part = parts[1] || '';
+      base64Part = base64Part.replace(/[^A-Za-z0-9+/=]/g, '');
+      finalData = 'data:image/jpeg;base64,' + base64Part;
+    } else if (raw.startsWith('data:')) {
+      // Has some data: prefix but wrong mime → fix mime
+      finalData = raw.replace(/^data:[^;]+;base64,/, 'data:image/jpeg;base64,');
+      finalData = finalData.replace(/[^A-Za-z0-9+/=]/g, ''); // clean after fix
+    } else {
+      // No prefix at all → add it (this is pure base64)
+      let base64Part = raw.replace(/[^A-Za-z0-9+/=]/g, '');
+      finalData = 'data:image/jpeg;base64,' + base64Part;
+    }
 
-    // Step 4: Build clean data URL
-    let finalData = 'data:image/jpeg;base64,' + base64Clean;
+    // 4. Fix padding (base64 length must be multiple of 4)
+    let base64Only = finalData.split('base64,')[1] || '';
+    const mod = base64Only.length % 4;
+    if (mod === 2) base64Only += '==';
+    if (mod === 3) base64Only += '=';
+    finalData = 'data:image/jpeg;base64,' + base64Only;
 
-    // Step 5: Extra safety – cut at first complete JPEG if suspicious
+    // 5. Safety cut if multiple JPEGs concatenated
     const endPos = finalData.indexOf('//9k=');
     if (endPos > 1000 && endPos < finalData.length - 20) {
       finalData = finalData.substring(0, endPos + 5);
     }
 
-    // Debug: show what we're actually using
+    // Debug logs
     console.log("Cleaned src starts:", finalData.substring(0, 60));
     console.log("Cleaned src ends:", finalData.slice(-30));
     console.log("Final length:", finalData.length);
 
     previewImg.src = finalData + '?nocache=' + Date.now();
-    setStatus("Trying cleaned image");
+    setStatus("Trying cleaned image (no double prefix)");
   } catch (err) {
     setStatus("Failed: " + err.message, true);
     console.error(err);
