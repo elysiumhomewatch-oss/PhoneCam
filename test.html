@@ -103,41 +103,52 @@
   }
 
   async function showLastImage() {
-    const sheetId = extractSheetId(sheetInput.value.trim());
-    const cameraId = cameraSelect.value;
+  const sheetId = extractSheetId(sheetInput.value.trim());
+  const cameraId = cameraSelect.value;
 
-    if (!sheetId || !cameraId) return;
+  if (!sheetId || !cameraId) return;
 
-    previewImg.src = '';
-    setStatus("Loading latest image...");
+  previewImg.src = '';
+  setStatus("Loading latest image...");
 
-    try {
-      const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  try {
+    const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-      let data = await resp.text();
+    let raw = await resp.text();
 
-      // Clean up – remove any trailing timestamp/query junk if accidentally included
-      data = data.split('?')[0].trim();
+    // Step 1: Remove any trailing query string / timestamp junk
+    raw = raw.split('?')[0].trim();
 
-      // If it doesn't start with data: → assume it's pure base64
-      if (!data.startsWith('data:')) {
-        data = 'data:image/jpeg;base64,' + data;
-      }
+    // Step 2: Remove EVERY non-base64 character
+    let base64Clean = raw.replace(/[^A-Za-z0-9+/=]/g, '');
 
-      // Quick safety: if it looks like multiple images, take only up to first end marker
-      const endPos = data.indexOf('//9k=');
-      if (endPos > 1000) {
-        data = data.substring(0, endPos + 5); // rough cut after first JPEG end
-      }
+    // Step 3: Fix padding if length mod 4 is wrong
+    const mod = base64Clean.length % 4;
+    if (mod === 2) base64Clean += '==';
+    if (mod === 3) base64Clean += '=';
 
-      previewImg.src = data + '?t=' + Date.now(); // cache bust
-      setStatus("Image loaded");
-    } catch (err) {
-      setStatus("Failed to load image: " + err.message, true);
-      console.error(err);
+    // Step 4: Build clean data URL
+    let finalData = 'data:image/jpeg;base64,' + base64Clean;
+
+    // Step 5: Extra safety – cut at first complete JPEG if suspicious
+    const endPos = finalData.indexOf('//9k=');
+    if (endPos > 1000 && endPos < finalData.length - 20) {
+      finalData = finalData.substring(0, endPos + 5);
     }
+
+    // Debug: show what we're actually using
+    console.log("Cleaned src starts:", finalData.substring(0, 60));
+    console.log("Cleaned src ends:", finalData.slice(-30));
+    console.log("Final length:", finalData.length);
+
+    previewImg.src = finalData + '?nocache=' + Date.now();
+    setStatus("Trying cleaned image");
+  } catch (err) {
+    setStatus("Failed: " + err.message, true);
+    console.error(err);
   }
+}
 </script>
 
 </body>
