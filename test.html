@@ -66,41 +66,55 @@
   }
 
   async function loadCameras() {
-    const sheetId = extractSheetId(sheetInput.value.trim());
-    if (!sheetId) {
-      setStatus("Please enter a valid Sheet URL or ID", true);
-      return;
-    }
-
-    setStatus("Loading cameras...");
-    cameraSelect.disabled = true;
-    cameraSelect.innerHTML = '<option value="">-- loading... --</option>';
-
-    try {
-      const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&action=list`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-      const cameras = await resp.json();
-
-      cameraSelect.innerHTML = '<option value="">-- select camera --</option>';
-      cameras.forEach(cam => {
-        const opt = document.createElement('option');
-        opt.value = cam.id;
-        opt.textContent = cam.name || cam.id;
-        cameraSelect.appendChild(opt);
-      });
-
-      if (cameras.length === 0) {
-        setStatus("No cameras found in Register sheet", true);
-      } else {
-        setStatus(`Found ${cameras.length} cameras`);
-        cameraSelect.disabled = false;
-      }
-    } catch (err) {
-      setStatus("Error loading cameras: " + err.message, true);
-      console.error(err);
-    }
+  const sheetId = extractSheetId(sheetInput.value.trim());
+  if (!sheetId) {
+    setStatus("Please enter a valid Sheet URL or ID", true);
+    return;
   }
+
+  setStatus("Loading cameras...");
+  cameraSelect.disabled = true;
+  cameraSelect.innerHTML = '<option value="">-- loading... --</option>';
+
+  try {
+    const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&action=list`);
+    if (!resp.ok) {
+      throw new Error(`Server responded with HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+
+    // Safeguard: make sure we actually got an array
+    if (!Array.isArray(data)) {
+      console.error("Expected array but got:", data);
+      if (data && data.error) {
+        throw new Error(data.error + (data.details ? ` - ${data.details}` : ""));
+      } else {
+        throw new Error("Unexpected response format from server (not an array)");
+      }
+    }
+
+    cameraSelect.innerHTML = '<option value="">-- select camera --</option>';
+
+    data.forEach(cam => {
+      const opt = document.createElement('option');
+      opt.value = cam.id;
+      opt.textContent = cam.name || cam.id;
+      cameraSelect.appendChild(opt);
+    });
+
+    if (data.length === 0) {
+      setStatus("No cameras found in Register sheet", true);
+    } else {
+      setStatus(`Found ${data.length} cameras`);
+      cameraSelect.disabled = false;
+    }
+
+  } catch (err) {
+    setStatus("Error loading cameras: " + err.message, true);
+    console.error(err);
+  }
+}
 
   async function showLastImage() {
   const sheetId = extractSheetId(sheetInput.value.trim());
