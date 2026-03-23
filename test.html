@@ -103,69 +103,70 @@
   }
 
   async function showLastImage() {
-  const sheetId = extractSheetId(sheetInput.value.trim());
-  const cameraId = cameraSelect.value;
+    const sheetId = extractSheetId(sheetInput.value.trim());
+    const cameraId = cameraSelect.value;
 
-  if (!sheetId || !cameraId) return;
+    if (!sheetId || !cameraId) return;
 
-  previewImg.src = '';
-  setStatus("Loading latest image...");
+    previewImg.src = '';
+    setStatus("Loading latest image...");
 
-  try {
-    const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    try {
+      const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-    let raw = await resp.text();
+      let raw = await resp.text();
 
-    // 1. Remove trailing junk (timestamp, query, extra text after ?)
-    raw = raw.split('?')[0].trim();
+      // Step 1: Strip trailing junk and whitespace
+      raw = raw.split('?')[0].trim().replace(/\s+/g, '');
 
-    // 2. Remove ALL whitespace/newlines/tabs (Sheets often adds them)
-    raw = raw.replace(/\s+/g, '');
+      // Step 2: Extract pure base64 if prefixed
+      let base64 = raw;
+      if (raw.includes('base64,')) {
+        base64 = raw.split('base64,')[1] || raw;
+      }
 
-    // 3. Detect if it already has a proper data: prefix
-    let finalData;
-    if (raw.startsWith('data:image/jpeg;base64,')) {
-      // Already good → keep it, but clean base64 part only
-      let parts = raw.split('base64,');
-      let base64Part = parts[1] || '';
-      base64Part = base64Part.replace(/[^A-Za-z0-9+/=]/g, '');
-      finalData = 'data:image/jpeg;base64,' + base64Part;
-    } else if (raw.startsWith('data:')) {
-      // Has some data: prefix but wrong mime → fix mime
-      finalData = raw.replace(/^data:[^;]+;base64,/, 'data:image/jpeg;base64,');
-      finalData = finalData.replace(/[^A-Za-z0-9+/=]/g, ''); // clean after fix
-    } else {
-      // No prefix at all → add it (this is pure base64)
-      let base64Part = raw.replace(/[^A-Za-z0-9+/=]/g, '');
-      finalData = 'data:image/jpeg;base64,' + base64Part;
+      // Step 3: Keep ONLY valid base64 chars
+      base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+
+      // Step 4: Calculate required padding — NEVER add more than needed
+      const missing = (4 - (base64.length % 4)) % 4;
+      if (missing > 0 && missing < 3) {  // only add 1 or 2, never force 3 blindly
+        base64 += '='.repeat(missing);
+      }
+
+      // Debug before trying
+      console.log("After padding: length =", base64.length, "ends with:", base64.slice(-10));
+
+      // Step 5: Try data URL first
+      let dataUri = 'data:image/jpeg;base64,' + base64;
+      previewImg.src = dataUri + '?nocache=' + Date.now();
+
+      // If still broken after ~1.5 sec, fallback to Blob
+      setTimeout(() => {
+        if (previewImg.naturalWidth === 0 && previewImg.naturalHeight === 0) {
+          // Fallback: treat response as binary blob
+          resp.blob().then(blob => {
+            if (blob.size > 1000) {
+              const url = URL.createObjectURL(blob);
+              previewImg.src = url;
+              previewImg.onload = () => URL.revokeObjectURL(url);
+              setStatus("Fallback: Loaded as binary Blob");
+            } else {
+              setStatus("Blob too small – likely bad data", true);
+            }
+          }).catch(err => {
+            setStatus("Blob fallback failed: " + err.message, true);
+          });
+        }
+      }, 1500);  // give data URI a chance to fail visibly
+
+      setStatus("Trying cleaned image + blob fallback");
+    } catch (err) {
+      setStatus("Failed: " + err.message, true);
+      console.error(err);
     }
-
-    // 4. Fix padding (base64 length must be multiple of 4)
-    let base64Only = finalData.split('base64,')[1] || '';
-    const mod = base64Only.length % 4;
-    if (mod === 2) base64Only += '==';
-    if (mod === 3) base64Only += '=';
-    finalData = 'data:image/jpeg;base64,' + base64Only;
-
-    // 5. Safety cut if multiple JPEGs concatenated
-    const endPos = finalData.indexOf('//9k=');
-    if (endPos > 1000 && endPos < finalData.length - 20) {
-      finalData = finalData.substring(0, endPos + 5);
-    }
-
-    // Debug logs
-    console.log("Cleaned src starts:", finalData.substring(0, 60));
-    console.log("Cleaned src ends:", finalData.slice(-30));
-    console.log("Final length:", finalData.length);
-
-    previewImg.src = finalData + '?nocache=' + Date.now();
-    setStatus("Trying cleaned image (no double prefix)");
-  } catch (err) {
-    setStatus("Failed: " + err.message, true);
-    console.error(err);
   }
-}
 </script>
 
 </body>
