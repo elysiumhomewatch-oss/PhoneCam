@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Phone Cam Uploader – Battery Saver</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #000;
+      color: #eee;
+      text-align: center;
+      padding: 0;
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+    #setupSection {
+      max-width: 500px;
+      margin: 20px auto;
+      background: rgba(34,34,34,0.9);
+      padding: 20px;
+      border-radius: 10px;
+      position: relative;
+      z-index: 10;
+    }
+    label { display:block; margin:12px 0 6px; text-align:left; }
+    input {
+      width:100%; padding:10px; font-size:1em; border-radius:6px;
+      border:1px solid #444; box-sizing:border-box; background:#333; color:#eee;
+    }
+    button {
+      padding:12px 24px; font-size:1.1em; margin:20px 10px 10px;
+      background:#444; color:white; border:none; border-radius:6px; cursor:pointer;
+    }
+    button:hover { background:#666; }
+    #status {
+      font-weight:bold; min-height:1.5em; margin:15px 0; font-size:1.1em;
+    }
+    .success { color:#0f0; }
+    .error   { color:#f44; }
+    #preview-container {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #preview {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    #progress-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 4px;
+      background: #333;
+      z-index: 20;
+      transform-origin: left;
+      transform: scaleX(0);
+      transition: transform linear;
+    }
+    #progress-bar.active {
+      background: #0f0;
+    }
+    #touch-to-show {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      color: #aaa;
+      font-size: 1.4em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 15;
+      pointer-events: all;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body ontouchstart="showInterface()" onclick="showInterface()">
+
+  <div id="progress-bar"></div>
+
+  <div id="setupSection">
+    <h2>Phone → Camera Uploader</h2>
+
+    <label for="sheetUrl">Google Sheet URL:</label>
+    <input type="url" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." required>
+
+    <label for="cameraId">Camera ID (unique):</label>
+    <input type="text" id="cameraId" placeholder="cam-front-01" required>
+
+    <label for="cameraName">Camera Name:</label>
+    <input type="text" id="cameraName" placeholder="Front Door" required>
+
+    <label for="description">Description (optional):</label>
+    <input type="text" id="description" placeholder="Main entrance">
+
+    <label>Approximate Location (optional):</label>
+    <div style="display:flex; gap:10px;">
+      <input type="text" id="lat" placeholder="Latitude" style="flex:1;">
+      <input type="text" id="lng" placeholder="Longitude" style="flex:1;">
+    </div>
+
+    <label for="interval">Update every (seconds):</label>
+    <input type="number" id="interval" value="30" min="10" max="300">
+
+    <label for="maxImages">Keep last N images:</label>
+    <input type="number" id="maxImages" value="10" min="1" max="50">
+
+    <button id="startBtn" onclick="startOrResume()">Save & Start / Resume</button>
+  </div>
+
+  <div id="preview-container">
+    <img id="preview" alt="Latest snapshot">
+  </div>
+
+  <div id="touch-to-show" class="hidden">
+    Tap screen to show preview & controls
+  </div>
+
+  <p id="status" class="hidden">Initializing...</p>
+
+  <video id="video" autoplay playsinline muted class="hidden"></video>
+  <canvas id="canvas" class="hidden"></canvas>
+
+  <!-- Hidden form + iframe -->
+  <form id="uploadForm" method="POST" target="hiddenIframe" class="hidden">
+    <input type="hidden" name="jsonData" id="jsonDataField">
+  </form>
+  <iframe name="hiddenIframe" class="hidden" style="display:none;"></iframe>
+
+  <script>
+    const STORAGE_KEY = 'phoneCamSettings';
+
+    const setupSection   = document.getElementById('setupSection');
+    const status         = document.getElementById('status');
+    const preview        = document.getElementById('preview');
+    const touchOverlay   = document.getElementById('touch-to-show');
+    const progressBar    = document.getElementById('progress-bar');
+    const videoEl        = document.getElementById('video');
+    const canvasEl       = document.getElementById('canvas');
+    const ctx            = canvasEl.getContext('2d');
+
+    let stream = null;
+    let timer  = null;
+    let nextUploadTime = 0;
+
+    // Load saved settings
+    window.addEventListener('load', () => {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          const s = JSON.parse(saved);
+          document.getElementById('sheetUrl').value    = s.sheetUrl    || '';
+          document.getElementById('cameraId').value    = s.cameraId    || '';
+          document.getElementById('cameraName').value  = s.cameraName  || '';
+          document.getElementById('description').value = s.description || '';
+          document.getElementById('lat').value         = s.lat         || '';
+          document.getElementById('lng').value         = s.lng         || '';
+          document.getElementById('interval').value    = s.interval    || '30';
+          document.getElementById('maxImages').value   = s.maxImages   || '10';
+
+          // Auto-resume if settings exist
+          startOrResume(true); // true = silent mode
+        } catch (e) {}
+      }
+    });
+
+    function startOrResume(silent = false) {
+      const settings = {
+        sheetUrl:    document.getElementById('sheetUrl').value.trim(),
+        cameraId:    document.getElementById('cameraId').value.trim(),
+        cameraName:  document.getElementById('cameraName').value.trim(),
+        description: document.getElementById('description').value.trim(),
+        lat:         document.getElementById('lat').value.trim(),
+        lng:         document.getElementById('lng').value.trim(),
+        interval:    parseInt(document.getElementById('interval').value) || 30,
+        maxImages:   parseInt(document.getElementById('maxImages').value) || 10
+      };
+
+      if (!settings.sheetUrl || !settings.cameraId || !settings.cameraName) {
+        if (!silent) {
+          status.textContent = 'Sheet URL, Camera ID and Name are required';
+          status.className = 'error';
+        }
+        return;
+      }
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+
+      if (!silent) {
+        setupSection.classList.add('hidden');
+        status.classList.remove('hidden');
+      }
+
+      status.textContent = 'Starting camera...';
+      status.className = '';
+
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      })
+      .then(s => {
+        stream = s;
+        videoEl.srcObject = stream;
+        status.textContent = 'Camera ready – first image now...';
+        captureAndSend();  // immediate first upload
+        startProgressTimer(settings.interval * 1000);
+      })
+      .catch(err => {
+        status.textContent = 'Camera error: ' + err.message;
+        status.className = 'error';
+      });
+    }
+
+    function startProgressTimer(intervalMs) {
+      progressBar.classList.add('active');
+      progressBar.style.transition = 'none';
+      progressBar.style.transform = 'scaleX(0)';
+
+      setTimeout(() => {
+        progressBar.style.transition = `transform ${intervalMs/1000}s linear`;
+        progressBar.style.transform = 'scaleX(1)';
+      }, 50);
+
+      timer = setInterval(() => {
+        captureAndSend();
+        progressBar.style.transition = 'none';
+        progressBar.style.transform = 'scaleX(0)';
+        setTimeout(() => {
+          progressBar.style.transition = `transform ${intervalMs/1000}s linear`;
+          progressBar.style.transform = 'scaleX(1)';
+        }, 50);
+      }, intervalMs);
+    }
+
+    function captureAndSend() {
+      if (videoEl.videoWidth === 0) return;
+
+      canvasEl.width = videoEl.videoWidth;
+      canvasEl.height = videoEl.videoHeight;
+      ctx.drawImage(videoEl, 0, 0);
+
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, canvasEl.height - 40, canvasEl.width, 40);
+      ctx.fillStyle = '#fff';
+      ctx.font = '16px Arial';
+      ctx.fillText(new Date().toLocaleString(), 10, canvasEl.height - 15);
+
+      const dataUrl = canvasEl.toDataURL('image/jpeg', 0.65);
+      preview.src = dataUrl;
+
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+      const payload = {
+        sheetUrl:    saved.sheetUrl,
+        cameraId:    saved.cameraId,
+        cameraName:  saved.cameraName,
+        description: saved.description,
+        lat:         saved.lat,
+        lng:         saved.lng,
+        interval:    saved.interval,
+        maxImages:   saved.maxImages,
+        image:       dataUrl,
+        width:       canvasEl.width,
+        height:      canvasEl.height,
+        userAgent:   navigator.userAgent,
+        addedBy:     'morney'
+      };
+
+      document.getElementById('jsonDataField').value = JSON.stringify(payload);
+      document.getElementById('uploadForm').action = 'https://script.google.com/macros/library/d/1asOI269GY97rJ-mYtbhyNWaeHhSaMwXhFc4Ej1u4I20BWWD04Uczf15D/3';
+      document.getElementById('uploadForm').submit();
+
+      status.textContent = `Sent → ${new Date().toLocaleTimeString()}`;
+      status.className = 'success';
+    }
+
+    // Black screen / touch to show
+    function showInterface() {
+      touchOverlay.classList.add('hidden');
+      preview.style.opacity = '1';
+      status.classList.remove('hidden');
+      // Optional: can hide again after timeout if desired
+    }
+
+    // Hide interface after start
+    function hideInterface() {
+      touchOverlay.classList.remove('hidden');
+      preview.style.opacity = '0';
+      status.classList.add('hidden');
+    }
+
+    // Auto-hide after first upload
+    // You can call hideInterface() after first successful send if wanted
+    // For now it's manual touch to show
+
+    window.addEventListener('beforeunload', () => {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (timer) clearInterval(timer);
+    });
+  </script>
+</body>
+</html>
