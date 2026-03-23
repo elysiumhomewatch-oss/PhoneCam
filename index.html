@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phone Cams Viewer</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+      margin: 0;
+      padding: 15px;
+      min-height: 100vh;
+    }
+    h1 { margin: 0 0 20px; text-align: center; }
+    #sheet-input {
+      max-width: 600px;
+      margin: 0 auto 30px;
+      text-align: center;
+    }
+    #sheetUrl {
+      width: 80%;
+      max-width: 500px;
+      padding: 10px;
+      font-size: 1em;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #222;
+      color: #eee;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 1em;
+      margin-left: 10px;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover { background: #666; }
+    #camera-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .camera-card {
+      background: #222;
+      border-radius: 10px;
+      padding: 12px;
+      overflow: hidden;
+    }
+    .camera-card h3 {
+      margin: 0 0 8px;
+      font-size: 1.2em;
+    }
+    .camera-card p {
+      margin: 4px 0;
+      font-size: 0.9em;
+      color: #aaa;
+    }
+    .preview-container {
+      width: 100%;
+      height: 180px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+    .preview-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      position: absolute;
+      top: 0; left: 0;
+      opacity: 0;
+      transition: opacity 0.6s;
+    }
+    .preview-img.active {
+      opacity: 1;
+    }
+    #loading, #no-cameras {
+      text-align: center;
+      margin: 40px 0;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Phone Cams Viewer</h1>
+
+  <div id="sheet-input">
+    <input type="url" id="sheetUrl" placeholder="Paste your Google Sheet URL here">
+    <button onclick="loadCameras()">Load / Refresh</button>
+  </div>
+
+  <div id="loading">Loading cameras...</div>
+  <div id="no-cameras" class="hidden">No cameras found in this sheet</div>
+
+  <div id="camera-list"></div>
+
+  <script>
+    const STORAGE_KEY = 'viewerSheetUrl';
+
+    const sheetInput = document.getElementById('sheetUrl');
+    const loading    = document.getElementById('loading');
+    const noCameras  = document.getElementById('no-cameras');
+    const list       = document.getElementById('camera-list');
+
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec';
+
+    // Load saved sheet URL
+    window.addEventListener('load', () => {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        sheetInput.value = saved;
+        loadCameras();
+      }
+    });
+
+    async function loadCameras() {
+      const url = sheetInput.value.trim();
+      if (!url) {
+        alert('Please enter a Sheet URL');
+        return;
+      }
+
+      // Save for next time
+      localStorage.setItem(STORAGE_KEY, url);
+
+      loading.textContent = 'Loading cameras...';
+      loading.classList.remove('hidden');
+      noCameras.classList.add('hidden');
+      list.innerHTML = '';
+
+      try {
+        const sheetId = extractSheetId(url);
+        if (!sheetId) throw new Error('Invalid Sheet URL');
+
+        // Get list of cameras
+        const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&action=list`);
+        if (!resp.ok) throw new Error('Failed to load camera list');
+
+        const cameras = await resp.json();
+
+        if (!cameras || cameras.length === 0) {
+          loading.classList.add('hidden');
+          noCameras.classList.remove('hidden');
+          return;
+        }
+
+        loading.classList.add('hidden');
+
+        cameras.forEach(cam => {
+          const card = document.createElement('div');
+          card.className = 'camera-card';
+
+          card.innerHTML = `
+            <h3>${cam.name || cam.id}</h3>
+            <p><strong>ID:</strong> ${cam.id}</p>
+            ${cam.desc ? `<p>${cam.desc.substring(0, 80)}${cam.desc.length > 80 ? '...' : ''}</p>` : ''}
+            <div class="preview-container">
+              <img class="preview-img" data-camera-id="${cam.id}" alt="Loading...">
+            </div>
+          `;
+
+          list.appendChild(card);
+        });
+
+        // Start slideshow for each camera
+        updatePreviews(cameras);
+        setInterval(() => updatePreviews(cameras), 10000); // refresh every 10 seconds
+
+      } catch (err) {
+        loading.textContent = 'Error: ' + err.message;
+        console.error(err);
+      }
+    }
+
+    async function updatePreviews(cameras) {
+      const sheetId = extractSheetId(sheetInput.value.trim());
+      if (!sheetId) return;
+
+      for (const cam of cameras) {
+        const img = document.querySelector(`img[data-camera-id="${cam.id}"]`);
+        if (!img) continue;
+
+        try {
+          const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${cam.id}`);
+          if (!resp.ok) continue;
+
+          const base64 = await resp.text();
+          if (base64 && base64.startsWith('data:image')) {
+            // Simple fade effect
+            img.style.opacity = '0';
+            setTimeout(() => {
+              img.src = base64 + '?t=' + Date.now(); // cache bust
+              img.style.opacity = '1';
+            }, 400);
+          }
+        } catch (e) {
+          console.warn('Failed to load image for', cam.id, e);
+        }
+      }
+    }
+
+    function extractSheetId(url) {
+      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      return match ? match[1] : null;
+    }
+  </script>
+</body>
+</html>
