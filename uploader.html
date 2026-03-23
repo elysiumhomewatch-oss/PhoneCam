@@ -2,98 +2,83 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Phone Cam Uploader – Battery Saver</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phone Cam Uploader – Settings Saved</title>
   <link rel="icon" href="data:,">
   <style>
     body {
       font-family: sans-serif;
-      background: #000;
+      background: #111;
       color: #eee;
       text-align: center;
-      padding: 0;
+      padding: 15px;
       margin: 0;
-      height: 100vh;
-      overflow: hidden;
-      touch-action: manipulation;
     }
-    #setupSection {
+    h2 { margin: 10px 0 5px; }
+    .setup-form {
       max-width: 500px;
-      margin: 20px auto;
-      background: rgba(34,34,34,0.9);
+      margin: 0 auto;
+      background: #222;
       padding: 20px;
       border-radius: 10px;
-      position: relative;
-      z-index: 10;
     }
-    label { display:block; margin:12px 0 6px; text-align:left; }
-    input {
-      width:100%; padding:10px; font-size:1em; border-radius:6px;
-      border:1px solid #444; box-sizing:border-box; background:#333; color:#eee;
+    label {
+      display: block;
+      margin: 10px 0 5px;
+      text-align: left;
+    }
+    input[type="text"],
+    input[type="number"],
+    input[type="url"] {
+      width: 100%;
+      padding: 10px;
+      font-size: 1em;
+      border-radius: 6px;
+      border: 1px solid #444;
+      box-sizing: border-box;
+      background: #333;
+      color: #eee;
     }
     button {
-      padding:12px 24px; font-size:1.1em; margin:20px 10px 10px;
-      background:#444; color:white; border:none; border-radius:6px; cursor:pointer;
+      padding: 12px 24px;
+      font-size: 1.1em;
+      margin: 20px 10px 10px;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
     }
-    button:hover { background:#666; }
+    button:hover { background: #666; }
     #status {
-      font-weight:bold; min-height:1.5em; margin:15px 0; font-size:1.1em;
+      font-weight: bold;
+      min-height: 1.5em;
+      margin: 15px 0;
     }
-    .success { color:#0f0; }
-    .error   { color:#f44; }
-    #preview-container {
-      position: fixed;
-      inset: 0;
+    .success { color: #0f0; }
+    .error   { color: #f44; }
+    video, img {
+      max-width: 90%;
+      margin: 10px auto;
+      display: block;
+      border: 2px solid #444;
+      border-radius: 8px;
       background: #000;
-      z-index: 5;
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
-    #preview {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-      opacity: 0;
-      transition: opacity 0.4s;
-    }
-    #progress-bar {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      height: 4px;
-      background: #333;
-      z-index: 20;
-      transform-origin: left;
-      transform: scaleX(0);
-      transition: transform linear;
-    }
-    #progress-bar.active { background: #0f0; }
-    #touch-to-show {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.85);
-      color: #aaa;
-      font-size: 1.4em;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 15;
-      pointer-events: all;
-    }
-    .hidden { display: none !important; }
+    .hidden { display: none; }
   </style>
 </head>
-<body ontouchstart="showInterface()" onclick="showInterface()">
+<body>
 
-  <div id="progress-bar"></div>
+  <h2>Phone → Camera Uploader</h2>
 
-  <div id="setupSection">
-    <h2>Phone → Camera Uploader</h2>
+  <div id="setupSection" class="setup-form">
+    <p id="setupTitle">Setup Camera</p>
 
-    <label for="sheetUrl">Google Sheet URL:</label>
+    <label for="sheetUrl">Google Sheet URL (blank/new sheet):</label>
     <input type="url" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." required>
 
-    <label for="cameraId">Camera ID (unique):</label>
+    <label for="cameraId">Camera ID (unique, e.g. cam-front-01):</label>
     <input type="text" id="cameraId" placeholder="cam-front-01" required>
 
     <label for="cameraName">Camera Name:</label>
@@ -117,36 +102,33 @@
     <button id="startBtn" onclick="startOrResume()">Save & Start / Resume</button>
   </div>
 
-  <div id="preview-container">
-    <img id="preview" alt="Latest snapshot">
-  </div>
-
-  <div id="touch-to-show">
-    Tap screen to show preview & controls
-  </div>
-
   <p id="status" class="hidden">Initializing...</p>
 
-  <video id="video" autoplay playsinline muted class="hidden"></video>
-  <canvas id="canvas" class="hidden"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" style="display:none;"></canvas>
+  <img id="preview" alt="Latest snapshot">
+
+  <!-- Hidden form + iframe -->
+  <form id="uploadForm" method="POST" target="hiddenIframe" class="hidden">
+    <input type="hidden" name="jsonData" id="jsonDataField">
+  </form>
+  <iframe name="hiddenIframe" style="display:none; width:0;height:0;"></iframe>
 
   <script>
     const STORAGE_KEY = 'phoneCamSettings';
 
-    const setupSection   = document.getElementById('setupSection');
-    const status         = document.getElementById('status');
-    const preview        = document.getElementById('preview');
-    const touchOverlay   = document.getElementById('touch-to-show');
-    const progressBar    = document.getElementById('progress-bar');
-    const videoEl        = document.getElementById('video');
-    const canvasEl       = document.getElementById('canvas');
-    const ctx            = canvasEl.getContext('2d');
+    const setupSection = document.getElementById('setupSection');
+    const setupTitle   = document.getElementById('setupTitle');
+    const status       = document.getElementById('status');
+    const videoEl      = document.getElementById('video');
+    const canvasEl     = document.getElementById('canvas');
+    const ctx          = canvasEl.getContext('2d');
+    const previewEl    = document.getElementById('preview');
 
     let stream = null;
     let timer  = null;
-    let progressInitialized = false;
 
-    // Load saved settings
+    // Load saved settings on page load
     window.addEventListener('load', () => {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -161,15 +143,18 @@
           document.getElementById('interval').value    = s.interval    || '30';
           document.getElementById('maxImages').value   = s.maxImages   || '10';
 
-          // Auto-resume silently
-          startOrResume(true);
+          setupTitle.textContent = 'Resume with saved settings?';
+          document.getElementById('startBtn').textContent = 'Resume Camera';
+          status.textContent = 'Settings loaded from previous session.';
+          status.className = 'success';
+          status.classList.remove('hidden');
         } catch (e) {
           console.warn('Invalid saved settings', e);
         }
       }
     });
 
-    function startOrResume(silent = false) {
+    function startOrResume() {
       const settings = {
         sheetUrl:    document.getElementById('sheetUrl').value.trim(),
         cameraId:    document.getElementById('cameraId').value.trim(),
@@ -182,22 +167,20 @@
       };
 
       if (!settings.sheetUrl || !settings.cameraId || !settings.cameraName) {
-        if (!silent) {
-          status.textContent = 'Sheet URL, Camera ID and Name are required';
-          status.className = 'error';
-        }
+        status.textContent = 'Sheet URL, Camera ID and Name are required';
+        status.className = 'error';
+        status.classList.remove('hidden');
         return;
       }
 
+      // Save settings locally
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 
-      if (!silent) {
-        setupSection.classList.add('hidden');
-        status.classList.remove('hidden');
-      }
-
+      setupSection.classList.add('hidden');
       status.textContent = 'Starting camera...';
       status.className = '';
+      status.classList.remove('hidden');
+      videoEl.classList.remove('hidden');
 
       navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' }
@@ -205,45 +188,14 @@
       .then(s => {
         stream = s;
         videoEl.srcObject = stream;
-        status.textContent = 'Camera ready – first image now...';
-
-        captureAndSend(); // immediate first upload
-
-        if (!progressInitialized) {
-          const intervalMs = settings.interval * 1000;
-          startProgressTimer(intervalMs);
-          progressInitialized = true;
-        }
-
-        // Hide interface after first capture (battery saver)
-        setTimeout(hideInterface, 3000); // 3 seconds delay – adjust as needed
+        status.textContent = 'Camera ready – capturing first image now...';
+        captureAndSend();  // FIRST IMAGE IMMEDIATELY
+        timer = setInterval(captureAndSend, settings.interval * 1000);
       })
       .catch(err => {
         status.textContent = 'Camera error: ' + err.message;
         status.className = 'error';
       });
-    }
-
-    function startProgressTimer(intervalMs) {
-      progressBar.classList.add('active');
-      progressBar.style.transition = 'none';
-      progressBar.style.transform = 'scaleX(0)';
-
-      const resetAndStart = () => {
-        progressBar.style.transition = 'none';
-        progressBar.style.transform = 'scaleX(0)';
-        setTimeout(() => {
-          progressBar.style.transition = `transform ${intervalMs/1000}s linear`;
-          progressBar.style.transform = 'scaleX(1)';
-        }, 50);
-      };
-
-      resetAndStart();
-
-      timer = setInterval(() => {
-        captureAndSend();
-        resetAndStart();
-      }, intervalMs);
     }
 
     function captureAndSend() {
@@ -260,11 +212,11 @@
       ctx.fillText(new Date().toLocaleString(), 10, canvasEl.height - 15);
 
       const dataUrl = canvasEl.toDataURL('image/jpeg', 0.65);
-      preview.src = dataUrl;
+      previewEl.src = dataUrl;
 
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
 
-      const payload = JSON.stringify({
+      const payload = {
         sheetUrl:    saved.sheetUrl,
         cameraId:    saved.cameraId,
         cameraName:  saved.cameraName,
@@ -278,36 +230,14 @@
         height:      canvasEl.height,
         userAgent:   navigator.userAgent,
         addedBy:     'morney'
-      });
+      };
 
-      fetch('https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec', {
-        method: 'POST',
-        mode: 'no-cors',
-        redirect: 'follow',
-        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-        body: payload
-      })
-      .then(() => {
-        status.textContent = `Sent → ${new Date().toLocaleTimeString()}`;
-        status.className = 'success';
-      })
-      .catch(err => {
-        status.textContent = 'Send failed: ' + err.message;
-        status.className = 'error';
-        console.error('Upload error:', err);
-      });
-    }
+      document.getElementById('jsonDataField').value = JSON.stringify(payload);
+      document.getElementById('uploadForm').action = 'https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec';
+      document.getElementById('uploadForm').submit();
 
-    function showInterface() {
-      touchOverlay.classList.add('hidden');
-      preview.style.opacity = '1';
-      status.classList.remove('hidden');
-    }
-
-    function hideInterface() {
-      touchOverlay.classList.remove('hidden');
-      preview.style.opacity = '0';
-      status.classList.add('hidden');
+      status.textContent = `Snapshot sent → ${new Date().toLocaleTimeString()}`;
+      status.className = 'success';
     }
 
     window.addEventListener('beforeunload', () => {
