@@ -203,50 +203,56 @@
     });
   }
 
-  function captureAndSend() {
-    if (videoEl.videoWidth === 0 || videoEl.videoHeight === 0) {
-      console.log('Video not ready yet');
-      return;
-    }
+  async function captureAndSend() {
+  if (videoEl.videoWidth === 0) return;
 
-    canvasEl.width = videoEl.videoWidth;
-    canvasEl.height = videoEl.videoHeight;
-    ctx.drawImage(videoEl, 0, 0);
+  canvasEl.width = videoEl.videoWidth;
+  canvasEl.height = videoEl.videoHeight;
+  ctx.drawImage(videoEl, 0, 0);
 
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(0, canvasEl.height - 40, canvasEl.width, 40);
-    ctx.fillStyle = '#fff';
-    ctx.font = '16px Arial';
-    ctx.fillText(new Date().toLocaleString(), 10, canvasEl.height - 15);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, canvasEl.height - 40, canvasEl.width, 40);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px Arial';
+  ctx.fillText(new Date().toLocaleString(), 10, canvasEl.height - 15);
 
-    const dataUrl = canvasEl.toDataURL('image/jpeg', 0.65);
-    previewEl.src = dataUrl;
+  const dataUrl = canvasEl.toDataURL('image/jpeg', 0.65);
+  preview.src = dataUrl; // local preview should work immediately
 
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
 
-    const payload = {
-      sheetUrl:    saved.sheetUrl,
-      cameraId:    saved.cameraId,
-      cameraName:  saved.cameraName,
-      description: saved.description,
-      lat:         saved.lat,
-      lng:         saved.lng,
-      interval:    saved.interval,
-      maxImages:   saved.maxImages,
-      image:       dataUrl,
-      width:       canvasEl.width,
-      height:      canvasEl.height,
-      userAgent:   navigator.userAgent,
-      addedBy:     'morney'
-    };
+  const payload = {
+    sheetUrl:    saved.sheetUrl,
+    cameraId:    saved.cameraId,
+    cameraName:  saved.cameraName,
+    description: saved.description,
+    lat:         saved.lat,
+    lng:         saved.lng,
+    interval:    saved.interval,
+    maxImages:   saved.maxImages,
+    image:       dataUrl,          // full data URL (with prefix)
+    width:       canvasEl.width,
+    height:      canvasEl.height,
+    userAgent:   navigator.userAgent,
+    addedBy:     'morney'
+  };
 
-    document.getElementById('jsonDataField').value = JSON.stringify(payload);
-    document.getElementById('uploadForm').action = 'https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec';
-    document.getElementById('uploadForm').submit();
+  try {
+    const response = await fetch('https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec', {
+      method: 'POST',
+      mode: 'no-cors',               // allows large payload without CORS preflight issues
+      redirect: 'follow',
+      body: JSON.stringify(payload)
+    });
 
-    status.textContent = `Snapshot sent → ${new Date().toLocaleTimeString()}`;
+    status.textContent = `Sent → ${new Date().toLocaleTimeString()}`;
     status.className = 'success';
+  } catch (err) {
+    status.textContent = 'Send failed: ' + err.message;
+    status.className = 'error';
+    console.error('Upload error:', err);
   }
+}
 
   window.addEventListener('beforeunload', () => {
     if (stream) stream.getTracks().forEach(t => t.stop());
