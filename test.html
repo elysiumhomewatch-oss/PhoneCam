@@ -120,46 +120,58 @@
   const sheetId = extractSheetId(sheetInput.value.trim());
   const cameraId = cameraSelect.value;
 
-  if (!sheetId || !cameraId) return;
+  if (!sheetId || !cameraId) {
+    setStatus("Please select a sheet and camera", true);
+    return;
+  }
 
   previewImg.src = '';
-  setStatus("Loading latest image... (blob mode)");
+  setStatus("Loading latest image...");
 
   try {
+    // Add timestamp to prevent browser caching the old (possibly broken) response
     const url = `${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}&t=${Date.now()}`;
+
     const resp = await fetch(url);
 
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} - ${resp.statusText}`);
+      let errorText = await resp.text().catch(() => '');
+      throw new Error(`Server error ${resp.status} — ${errorText || resp.statusText}`);
     }
 
-    const contentType = resp.headers.get('Content-Type') || '';
-    console.log("Response Content-Type:", contentType);
-
+    // Get blob directly (this is why we changed server to return binary)
     const blob = await resp.blob();
-    console.log("Blob size:", blob.size, "type:", blob.type);
 
-    if (blob.size < 1000 || !blob.type.startsWith('image/')) {
-      setStatus("Invalid image blob from server (too small or wrong type)", true);
-      return;
+    console.log("Received blob → size:", blob.size, "type:", blob.type);
+
+    // Basic validation
+    if (blob.size < 1000) {
+      throw new Error("Image data too small (likely empty or failed)");
     }
 
+    if (!blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') {
+      throw new Error(`Unexpected content type: ${blob.type}`);
+    }
+
+    // Create object URL and set as image source
     const objectUrl = URL.createObjectURL(blob);
     previewImg.src = objectUrl;
 
+    // Clean up memory once image is loaded
     previewImg.onload = () => {
-      URL.revokeObjectURL(objectUrl);  // free memory once loaded
-      setStatus(`Loaded successfully (${(blob.size / 1024).toFixed(1)} KB)`);
+      URL.revokeObjectURL(objectUrl);
+      setStatus(`Image loaded (${(blob.size / 1024).toFixed(1)} KB)`);
     };
 
+    // If image fails to decode/display
     previewImg.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      setStatus("Blob loaded but browser failed to display it (corrupt?)", true);
+      setStatus("Image failed to display (possibly corrupt data)", true);
     };
 
   } catch (err) {
-    setStatus("Fetch / blob error: " + err.message, true);
-    console.error(err);
+    setStatus("Failed to load image: " + err.message, true);
+    console.error("showLastImage error:", err);
   }
 }
 </script>
