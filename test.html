@@ -103,70 +103,51 @@
   }
 
   async function showLastImage() {
-    const sheetId = extractSheetId(sheetInput.value.trim());
-    const cameraId = cameraSelect.value;
+  const sheetId = extractSheetId(sheetInput.value.trim());
+  const cameraId = cameraSelect.value;
 
-    if (!sheetId || !cameraId) return;
+  if (!sheetId || !cameraId) return;
 
-    previewImg.src = '';
-    setStatus("Loading latest image...");
+  previewImg.src = '';
+  setStatus("Loading latest image... (blob mode)");
 
-    try {
-      const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  try {
+    const url = `${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}&t=${Date.now()}`;
+    const resp = await fetch(url);
 
-      let raw = await resp.text();
-
-      // Step 1: Strip trailing junk and whitespace
-      raw = raw.split('?')[0].trim().replace(/\s+/g, '');
-
-      // Step 2: Extract pure base64 if prefixed
-      let base64 = raw;
-      if (raw.includes('base64,')) {
-        base64 = raw.split('base64,')[1] || raw;
-      }
-
-      // Step 3: Keep ONLY valid base64 chars
-      base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-
-      // Step 4: Calculate required padding — NEVER add more than needed
-      const missing = (4 - (base64.length % 4)) % 4;
-      if (missing > 0 && missing < 3) {  // only add 1 or 2, never force 3 blindly
-        base64 += '='.repeat(missing);
-      }
-
-      // Debug before trying
-      console.log("After padding: length =", base64.length, "ends with:", base64.slice(-10));
-
-      // Step 5: Try data URL first
-      let dataUri = 'data:image/jpeg;base64,' + base64;
-      previewImg.src = dataUri + '?nocache=' + Date.now();
-
-      // If still broken after ~1.5 sec, fallback to Blob
-      setTimeout(() => {
-        if (previewImg.naturalWidth === 0 && previewImg.naturalHeight === 0) {
-          // Fallback: treat response as binary blob
-          resp.blob().then(blob => {
-            if (blob.size > 1000) {
-              const url = URL.createObjectURL(blob);
-              previewImg.src = url;
-              previewImg.onload = () => URL.revokeObjectURL(url);
-              setStatus("Fallback: Loaded as binary Blob");
-            } else {
-              setStatus("Blob too small – likely bad data", true);
-            }
-          }).catch(err => {
-            setStatus("Blob fallback failed: " + err.message, true);
-          });
-        }
-      }, 1500);  // give data URI a chance to fail visibly
-
-      setStatus("Trying cleaned image + blob fallback");
-    } catch (err) {
-      setStatus("Failed: " + err.message, true);
-      console.error(err);
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} - ${resp.statusText}`);
     }
+
+    const contentType = resp.headers.get('Content-Type') || '';
+    console.log("Response Content-Type:", contentType);
+
+    const blob = await resp.blob();
+    console.log("Blob size:", blob.size, "type:", blob.type);
+
+    if (blob.size < 1000 || !blob.type.startsWith('image/')) {
+      setStatus("Invalid image blob from server (too small or wrong type)", true);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    previewImg.src = objectUrl;
+
+    previewImg.onload = () => {
+      URL.revokeObjectURL(objectUrl);  // free memory once loaded
+      setStatus(`Loaded successfully (${(blob.size / 1024).toFixed(1)} KB)`);
+    };
+
+    previewImg.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setStatus("Blob loaded but browser failed to display it (corrupt?)", true);
+    };
+
+  } catch (err) {
+    setStatus("Fetch / blob error: " + err.message, true);
+    console.error(err);
   }
+}
 </script>
 
 </body>
