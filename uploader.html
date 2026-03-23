@@ -275,7 +275,7 @@
       };
 
       document.getElementById('jsonDataField').value = JSON.stringify(payload);
-      document.getElementById('uploadForm').action = 'https://script.google.com/macros/library/d/1asOI269GY97rJ-mYtbhyNWaeHhSaMwXhFc4Ej1u4I20BWWD04Uczf15D/3';
+      document.getElementById('uploadForm').action = 'https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec';
       document.getElementById('uploadForm').submit();
 
       status.textContent = `Sent → ${new Date().toLocaleTimeString()}`;
