@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Phone Cams Viewer</title>
+  <title>Phone Cams Viewer – Single Feed</title>
   <link rel="icon" href="data:,">
   <style>
     body {
@@ -14,7 +14,10 @@
       padding: 15px;
       min-height: 100vh;
     }
-    h1 { margin: 0 0 20px; text-align: center; }
+    h1 {
+      margin: 0 0 20px;
+      text-align: center;
+    }
     #sheet-input {
       max-width: 600px;
       margin: 0 auto 30px;
@@ -41,52 +44,45 @@
       cursor: pointer;
     }
     button:hover { background: #666; }
-    #camera-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 20px;
-      max-width: 1200px;
-      margin: 0 auto;
+    #camera-select-container {
+      text-align: center;
+      margin: 30px 0;
     }
-    .camera-card {
-      background: #222;
-      border-radius: 10px;
+    #camera-select {
       padding: 12px;
-      overflow: hidden;
+      font-size: 1.1em;
+      width: 80%;
+      max-width: 500px;
+      border-radius: 6px;
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
     }
-    .camera-card h3 {
-      margin: 0 0 8px;
-      font-size: 1.2em;
-    }
-    .camera-card p {
-      margin: 4px 0;
-      font-size: 0.9em;
-      color: #aaa;
-    }
-    .preview-container {
-      width: 100%;
-      height: 180px;
+    #preview-container {
+      max-width: 900px;
+      margin: 0 auto 20px;
       background: #000;
-      border-radius: 8px;
+      border-radius: 12px;
       overflow: hidden;
-      position: relative;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
     }
-    .preview-img {
+    #preview-img {
       width: 100%;
-      height: 100%;
+      height: auto;
+      display: block;
       object-fit: contain;
-      position: absolute;
-      top: 0; left: 0;
-      opacity: 0;
-      transition: opacity 0.6s;
     }
-    .preview-img.active {
-      opacity: 1;
-    }
-    #loading, #no-cameras {
+    #loading, #no-cameras, #no-selection {
       text-align: center;
       margin: 40px 0;
       color: #aaa;
+      font-size: 1.2em;
+    }
+    #refresh-info {
+      text-align: center;
+      color: #888;
+      font-size: 0.9em;
+      margin: 10px 0;
     }
   </style>
 </head>
@@ -99,22 +95,39 @@
     <button onclick="loadCameras()">Load / Refresh</button>
   </div>
 
+  <div id="camera-select-container">
+    <select id="camera-select" onchange="startCameraFeed()">
+      <option value="">-- Select a Camera --</option>
+    </select>
+  </div>
+
   <div id="loading">Loading cameras...</div>
   <div id="no-cameras" class="hidden">No cameras found in this sheet</div>
+  <div id="no-selection" class="hidden">Select a camera above to view live feed</div>
 
-  <div id="camera-list"></div>
+  <div id="preview-container" class="hidden">
+    <img id="preview-img" alt="Camera feed">
+  </div>
+
+  <div id="refresh-info" class="hidden">Feed refreshes every 10 seconds</div>
 
   <script>
     const STORAGE_KEY = 'viewerSheetUrl';
-
-    const sheetInput = document.getElementById('sheetUrl');
-    const loading    = document.getElementById('loading');
-    const noCameras  = document.getElementById('no-cameras');
-    const list       = document.getElementById('camera-list');
-
     const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec';
 
-    // Load saved sheet URL
+    const sheetInput    = document.getElementById('sheetUrl');
+    const select        = document.getElementById('camera-select');
+    const loading       = document.getElementById('loading');
+    const noCameras     = document.getElementById('no-cameras');
+    const noSelection   = document.getElementById('no-selection');
+    const previewCont   = document.getElementById('preview-container');
+    const previewImg    = document.getElementById('preview-img');
+    const refreshInfo   = document.getElementById('refresh-info');
+
+    let currentCameraId = null;
+    let refreshTimer    = null;
+
+    // Load saved sheet URL on page load
     window.addEventListener('load', () => {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -130,19 +143,19 @@
         return;
       }
 
-      // Save for next time
       localStorage.setItem(STORAGE_KEY, url);
 
       loading.textContent = 'Loading cameras...';
       loading.classList.remove('hidden');
       noCameras.classList.add('hidden');
-      list.innerHTML = '';
+      noSelection.classList.add('hidden');
+      previewCont.classList.add('hidden');
+      select.innerHTML = '<option value="">-- Select a Camera --</option>';
 
       try {
         const sheetId = extractSheetId(url);
         if (!sheetId) throw new Error('Invalid Sheet URL');
 
-        // Get list of cameras
         const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&action=list`);
         if (!resp.ok) throw new Error('Failed to load camera list');
 
@@ -155,26 +168,15 @@
         }
 
         loading.classList.add('hidden');
+        noSelection.classList.remove('hidden');
 
         cameras.forEach(cam => {
-          const card = document.createElement('div');
-          card.className = 'camera-card';
-
-          card.innerHTML = `
-            <h3>${cam.name || cam.id}</h3>
-            <p><strong>ID:</strong> ${cam.id}</p>
-            ${cam.desc ? `<p>${cam.desc.substring(0, 80)}${cam.desc.length > 80 ? '...' : ''}</p>` : ''}
-            <div class="preview-container">
-              <img class="preview-img" data-camera-id="${cam.id}" alt="Loading...">
-            </div>
-          `;
-
-          list.appendChild(card);
+          const option = document.createElement('option');
+          option.value = cam.id;
+          option.textContent = `${cam.name || cam.id} (${cam.id})`;
+          if (cam.desc) option.title = cam.desc;
+          select.appendChild(option);
         });
-
-        // Start slideshow for each camera
-        updatePreviews(cameras);
-        setInterval(() => updatePreviews(cameras), 10000); // refresh every 10 seconds
 
       } catch (err) {
         loading.textContent = 'Error: ' + err.message;
@@ -182,30 +184,51 @@
       }
     }
 
-    async function updatePreviews(cameras) {
+    async function startCameraFeed() {
+      const cameraId = select.value;
+      if (!cameraId) {
+        previewCont.classList.add('hidden');
+        noSelection.classList.remove('hidden');
+        if (refreshTimer) clearInterval(refreshTimer);
+        return;
+      }
+
+      currentCameraId = cameraId;
+      noSelection.classList.add('hidden');
+      previewCont.classList.remove('hidden');
+
+      // Clear old timer
+      if (refreshTimer) clearInterval(refreshTimer);
+
+      // Load first image immediately
+      await loadSingleImage();
+
+      // Then refresh every 10 seconds
+      refreshTimer = setInterval(loadSingleImage, 10000);
+    }
+
+    async function loadSingleImage() {
+      if (!currentCameraId) return;
+
       const sheetId = extractSheetId(sheetInput.value.trim());
       if (!sheetId) return;
 
-      for (const cam of cameras) {
-        const img = document.querySelector(`img[data-camera-id="${cam.id}"]`);
-        if (!img) continue;
+      try {
+        const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${currentCameraId}`);
+        if (!resp.ok) throw new Error('Failed to load image');
 
-        try {
-          const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${cam.id}`);
-          if (!resp.ok) continue;
-
-          const base64 = await resp.text();
-          if (base64 && base64.startsWith('data:image')) {
-            // Simple fade effect
-            img.style.opacity = '0';
-            setTimeout(() => {
-              img.src = base64 + '?t=' + Date.now(); // cache bust
-              img.style.opacity = '1';
-            }, 400);
-          }
-        } catch (e) {
-          console.warn('Failed to load image for', cam.id, e);
+        const base64 = await resp.text();
+        if (base64 && base64.startsWith('data:image')) {
+          previewImg.src = base64 + '?t=' + Date.now(); // cache bust
+          previewImg.style.opacity = '1';
+        } else {
+          previewImg.src = '';
+          previewImg.style.opacity = '0';
         }
+      } catch (err) {
+        console.warn('Image load error for', currentCameraId, err);
+        previewImg.src = '';
+        previewImg.style.opacity = '0';
       }
     }
 
