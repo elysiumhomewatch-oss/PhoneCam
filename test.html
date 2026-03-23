@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Test - Last Camera Image</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f8f9fa; }
+    .container { max-width: 900px; margin: 0 auto; }
+    input, button, select { padding: 10px; margin: 8px 0; font-size: 16px; }
+    button { background: #007bff; color: white; border: none; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    #preview { 
+      max-width: 100%; 
+      max-height: 600px; 
+      margin-top: 20px; 
+      border: 2px solid #ddd; 
+      background: #eee; 
+      object-fit: contain;
+    }
+    #status { color: #666; margin: 10px 0; font-style: italic; }
+    .error { color: #d32f2f; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>Test – Show Only Last Image per Camera</h2>
+
+  <label for="sheetUrl">Google Sheet URL or ID:</label><br>
+  <input type="text" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/abc123.../edit" style="width: 100%; max-width: 600px;" />
+
+  <br>
+  <button onclick="loadCameras()">Load Cameras</button>
+
+  <div id="status"></div>
+
+  <div style="margin-top: 20px;">
+    <label for="cameraSelect">Select Camera:</label><br>
+    <select id="cameraSelect" onchange="showLastImage()" disabled>
+      <option value="">-- select camera --</option>
+    </select>
+  </div>
+
+  <img id="preview" src="" alt="Latest image will appear here" />
+</div>
+
+<script>
+  // ←←← Paste your deployed Web App URL here ↓↓↓
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec";
+
+  const sheetInput = document.getElementById('sheetUrl');
+  const cameraSelect = document.getElementById('cameraSelect');
+  const previewImg = document.getElementById('preview');
+  const statusDiv = document.getElementById('status');
+
+  function setStatus(msg, isError = false) {
+    statusDiv.textContent = msg;
+    statusDiv.className = isError ? 'error' : '';
+  }
+
+  function extractSheetId(urlOrId) {
+    if (!urlOrId) return '';
+    const match = urlOrId.match(/[-\w]{25,}/);
+    return match ? match[0] : urlOrId.trim();
+  }
+
+  async function loadCameras() {
+    const sheetId = extractSheetId(sheetInput.value.trim());
+    if (!sheetId) {
+      setStatus("Please enter a valid Sheet URL or ID", true);
+      return;
+    }
+
+    setStatus("Loading cameras...");
+    cameraSelect.disabled = true;
+    cameraSelect.innerHTML = '<option value="">-- loading... --</option>';
+
+    try {
+      const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&action=list`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      const cameras = await resp.json();
+
+      cameraSelect.innerHTML = '<option value="">-- select camera --</option>';
+      cameras.forEach(cam => {
+        const opt = document.createElement('option');
+        opt.value = cam.id;
+        opt.textContent = cam.name || cam.id;
+        cameraSelect.appendChild(opt);
+      });
+
+      if (cameras.length === 0) {
+        setStatus("No cameras found in Register sheet", true);
+      } else {
+        setStatus(`Found ${cameras.length} cameras`);
+        cameraSelect.disabled = false;
+      }
+    } catch (err) {
+      setStatus("Error loading cameras: " + err.message, true);
+      console.error(err);
+    }
+  }
+
+  async function showLastImage() {
+    const sheetId = extractSheetId(sheetInput.value.trim());
+    const cameraId = cameraSelect.value;
+
+    if (!sheetId || !cameraId) return;
+
+    previewImg.src = '';
+    setStatus("Loading latest image...");
+
+    try {
+      const resp = await fetch(`${SCRIPT_URL}?sheetId=${sheetId}&cameraId=${encodeURIComponent(cameraId)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      let data = await resp.text();
+
+      // Clean up – remove any trailing timestamp/query junk if accidentally included
+      data = data.split('?')[0].trim();
+
+      // If it doesn't start with data: → assume it's pure base64
+      if (!data.startsWith('data:')) {
+        data = 'data:image/jpeg;base64,' + data;
+      }
+
+      // Quick safety: if it looks like multiple images, take only up to first end marker
+      const endPos = data.indexOf('//9k=');
+      if (endPos > 1000) {
+        data = data.substring(0, endPos + 5); // rough cut after first JPEG end
+      }
+
+      previewImg.src = data + '?t=' + Date.now(); // cache bust
+      setStatus("Image loaded");
+    } catch (err) {
+      setStatus("Failed to load image: " + err.message, true);
+      console.error(err);
+    }
+  }
+</script>
+
+</body>
+</html>
