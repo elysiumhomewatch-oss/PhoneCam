@@ -115,135 +115,144 @@
   <iframe name="hiddenIframe" style="display:none; width:0;height:0;"></iframe>
 
   <script>
-    const STORAGE_KEY = 'phoneCamSettings';
+  const STORAGE_KEY = 'phoneCamSettings';
 
-    const setupSection = document.getElementById('setupSection');
-    const setupTitle   = document.getElementById('setupTitle');
-    const status       = document.getElementById('status');
-    const videoEl      = document.getElementById('video');
-    const canvasEl     = document.getElementById('canvas');
-    const ctx          = canvasEl.getContext('2d');
-    const previewEl    = document.getElementById('preview');
+  const setupSection = document.getElementById('setupSection');
+  const setupTitle   = document.getElementById('setupTitle');
+  const status       = document.getElementById('status');
+  const videoEl      = document.getElementById('video');
+  const canvasEl     = document.getElementById('canvas');
+  const ctx          = canvasEl.getContext('2d');
+  const previewEl    = document.getElementById('preview');
 
-    let stream = null;
-    let timer  = null;
+  let stream = null;
+  let timer  = null;
 
-    // Load saved settings on page load
-    window.addEventListener('load', () => {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try {
-          const s = JSON.parse(saved);
-          document.getElementById('sheetUrl').value    = s.sheetUrl    || '';
-          document.getElementById('cameraId').value    = s.cameraId    || '';
-          document.getElementById('cameraName').value  = s.cameraName  || '';
-          document.getElementById('description').value = s.description || '';
-          document.getElementById('lat').value         = s.lat         || '';
-          document.getElementById('lng').value         = s.lng         || '';
-          document.getElementById('interval').value    = s.interval    || '30';
-          document.getElementById('maxImages').value   = s.maxImages   || '10';
+  // Load saved settings
+  window.addEventListener('load', () => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const s = JSON.parse(saved);
+        document.getElementById('sheetUrl').value    = s.sheetUrl    || '';
+        document.getElementById('cameraId').value    = s.cameraId    || '';
+        document.getElementById('cameraName').value  = s.cameraName  || '';
+        document.getElementById('description').value = s.description || '';
+        document.getElementById('lat').value         = s.lat         || '';
+        document.getElementById('lng').value         = s.lng         || '';
+        document.getElementById('interval').value    = s.interval    || '30';
+        document.getElementById('maxImages').value   = s.maxImages   || '10';
 
-          setupTitle.textContent = 'Resume with saved settings?';
-          document.getElementById('startBtn').textContent = 'Resume Camera';
-          status.textContent = 'Settings loaded from previous session.';
-          status.className = 'success';
-          status.classList.remove('hidden');
-        } catch (e) {
-          console.warn('Invalid saved settings', e);
-        }
-      }
-    });
-
-    function startOrResume() {
-      const settings = {
-        sheetUrl:    document.getElementById('sheetUrl').value.trim(),
-        cameraId:    document.getElementById('cameraId').value.trim(),
-        cameraName:  document.getElementById('cameraName').value.trim(),
-        description: document.getElementById('description').value.trim(),
-        lat:         document.getElementById('lat').value.trim(),
-        lng:         document.getElementById('lng').value.trim(),
-        interval:    parseInt(document.getElementById('interval').value) || 30,
-        maxImages:   parseInt(document.getElementById('maxImages').value) || 10
-      };
-
-      if (!settings.sheetUrl || !settings.cameraId || !settings.cameraName) {
-        status.textContent = 'Sheet URL, Camera ID and Name are required';
-        status.className = 'error';
+        setupTitle.textContent = 'Resume with saved settings?';
+        document.getElementById('startBtn').textContent = 'Resume Camera';
+        status.textContent = 'Settings loaded from previous session.';
+        status.className = 'success';
         status.classList.remove('hidden');
-        return;
+      } catch (e) {
+        console.warn('Invalid saved settings', e);
       }
+    }
+  });
 
-      // Save settings locally
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  function startOrResume() {
+    const settings = {
+      sheetUrl:    document.getElementById('sheetUrl').value.trim(),
+      cameraId:    document.getElementById('cameraId').value.trim(),
+      cameraName:  document.getElementById('cameraName').value.trim(),
+      description: document.getElementById('description').value.trim(),
+      lat:         document.getElementById('lat').value.trim(),
+      lng:         document.getElementById('lng').value.trim(),
+      interval:    parseInt(document.getElementById('interval').value) || 30,
+      maxImages:   parseInt(document.getElementById('maxImages').value) || 10
+    };
 
-      setupSection.classList.add('hidden');
-      status.textContent = 'Starting camera...';
-      status.className = '';
+    if (!settings.sheetUrl || !settings.cameraId || !settings.cameraName) {
+      status.textContent = 'Sheet URL, Camera ID and Name are required';
+      status.className = 'error';
       status.classList.remove('hidden');
-      videoEl.classList.remove('hidden');
+      return;
+    }
 
-      navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      })
-      .then(s => {
-        stream = s;
-        videoEl.srcObject = stream;
-        status.textContent = 'Camera ready – capturing first image now...';
-        captureAndSend();  // FIRST IMAGE IMMEDIATELY
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+
+    setupSection.classList.add('hidden');
+    status.textContent = 'Starting camera...';
+    status.className = '';
+    status.classList.remove('hidden');
+    videoEl.classList.remove('hidden');           // ← SHOW LIVE VIDEO PREVIEW
+    previewEl.classList.remove('hidden');         // ← SHOW SNAPSHOT AREA
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }
+    })
+    .then(s => {
+      stream = s;
+      videoEl.srcObject = stream;
+      videoEl.play();  // ensure playback starts
+
+      // Wait briefly for video to be ready before first capture
+      videoEl.onloadedmetadata = () => {
+        status.textContent = 'Camera ready – capturing first image...';
+        captureAndSend();  // immediate first capture
         timer = setInterval(captureAndSend, settings.interval * 1000);
-      })
-      .catch(err => {
-        status.textContent = 'Camera error: ' + err.message;
-        status.className = 'error';
-      });
-    }
-
-    function captureAndSend() {
-      if (videoEl.videoWidth === 0) return;
-
-      canvasEl.width = videoEl.videoWidth;
-      canvasEl.height = videoEl.videoHeight;
-      ctx.drawImage(videoEl, 0, 0);
-
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(0, canvasEl.height - 40, canvasEl.width, 40);
-      ctx.fillStyle = '#fff';
-      ctx.font = '16px Arial';
-      ctx.fillText(new Date().toLocaleString(), 10, canvasEl.height - 15);
-
-      const dataUrl = canvasEl.toDataURL('image/jpeg', 0.65);
-      previewEl.src = dataUrl;
-
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-
-      const payload = {
-        sheetUrl:    saved.sheetUrl,
-        cameraId:    saved.cameraId,
-        cameraName:  saved.cameraName,
-        description: saved.description,
-        lat:         saved.lat,
-        lng:         saved.lng,
-        interval:    saved.interval,
-        maxImages:   saved.maxImages,
-        image:       dataUrl,
-        width:       canvasEl.width,
-        height:      canvasEl.height,
-        userAgent:   navigator.userAgent,
-        addedBy:     'morney'
       };
+    })
+    .catch(err => {
+      status.textContent = 'Camera error: ' + err.message;
+      status.className = 'error';
+    });
+  }
 
-      document.getElementById('jsonDataField').value = JSON.stringify(payload);
-      document.getElementById('uploadForm').action = 'https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec';
-      document.getElementById('uploadForm').submit();
-
-      status.textContent = `Snapshot sent → ${new Date().toLocaleTimeString()}`;
-      status.className = 'success';
+  function captureAndSend() {
+    if (videoEl.videoWidth === 0 || videoEl.videoHeight === 0) {
+      console.log('Video not ready yet');
+      return;
     }
 
-    window.addEventListener('beforeunload', () => {
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      if (timer) clearInterval(timer);
-    });
+    canvasEl.width = videoEl.videoWidth;
+    canvasEl.height = videoEl.videoHeight;
+    ctx.drawImage(videoEl, 0, 0);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, canvasEl.height - 40, canvasEl.width, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px Arial';
+    ctx.fillText(new Date().toLocaleString(), 10, canvasEl.height - 15);
+
+    const dataUrl = canvasEl.toDataURL('image/jpeg', 0.65);
+    previewEl.src = dataUrl;
+
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+    const payload = {
+      sheetUrl:    saved.sheetUrl,
+      cameraId:    saved.cameraId,
+      cameraName:  saved.cameraName,
+      description: saved.description,
+      lat:         saved.lat,
+      lng:         saved.lng,
+      interval:    saved.interval,
+      maxImages:   saved.maxImages,
+      image:       dataUrl,
+      width:       canvasEl.width,
+      height:      canvasEl.height,
+      userAgent:   navigator.userAgent,
+      addedBy:     'morney'
+    };
+
+    document.getElementById('jsonDataField').value = JSON.stringify(payload);
+    document.getElementById('uploadForm').action = 'https://script.google.com/macros/s/AKfycbyyJMgpDxOSiEOK65ZzVuhJ8Am5Jfx2Yl2cGv26oTxJtqlIs-6MN7IwNqJgswtKNkGZ/exec';
+    document.getElementById('uploadForm').submit();
+
+    status.textContent = `Snapshot sent → ${new Date().toLocaleTimeString()}`;
+    status.className = 'success';
+  }
+
+  window.addEventListener('beforeunload', () => {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (timer) clearInterval(timer);
+  });
   </script>
 </body>
 </html>
+
